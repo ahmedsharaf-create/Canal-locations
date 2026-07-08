@@ -45,8 +45,8 @@ function showToast(msg) {
 // ---------- Boot: decide setup vs login ----------
 (async function boot() {
   try {
-    const usersSnap = await getDocs(query(collection(db, "users"), limit(1)));
-    if (usersSnap.empty) {
+    const setupSnap = await getDoc(doc(db, "meta", "setup"));
+    if (!setupSnap.exists() || !setupSnap.data().completed) {
       $("setupScreen").classList.remove("hidden");
       $("loginScreen").classList.add("hidden");
     }
@@ -119,6 +119,7 @@ $("setupBtn").addEventListener("click", async () => {
   try {
     const cred = await createUserWithEmailAndPassword(auth, email, password);
     await setDoc(doc(db, "users", cred.user.uid), { email, name, role: "admin" });
+    await setDoc(doc(db, "meta", "setup"), { completed: true });
     showToast("Admin account created.");
     // onAuthStateChanged will pick this up and enter the app.
   } catch (e) {
