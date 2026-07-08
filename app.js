@@ -26,6 +26,7 @@ let state = {
   profile: null,         // Firestore users/{uid} doc data
   shops: [],
   submissions: [],
+  agents: [],
   selectedShift: null,
   capturedLocation: null,
   locating: false
@@ -33,6 +34,15 @@ let state = {
 
 const $ = (id) => document.getElementById(id);
 const todayStr = () => new Date().toISOString().slice(0, 10);
+const formatDate = (dateStr) => {
+  if (!dateStr) return "—";
+  const d = new Date(dateStr + "T00:00:00");
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+};
+const formatTime = (timestamp) => {
+  if (!timestamp || typeof timestamp.toDate !== "function") return "—";
+  return timestamp.toDate().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+};
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 function showToast(msg) {
@@ -200,7 +210,7 @@ async function enterApp() {
   $("fAgent").value = state.profile.name || "";
   $("fDate").value = todayStr();
 
-  ["navDashboard", "navShops", "navUsers"].forEach(id => $(id).classList.toggle("hidden", !isAdmin()));
+  ["navDashboard", "navSchedule", "navShops", "navUsers"].forEach(id => $(id).classList.toggle("hidden", !isAdmin()));
 
   await refreshShops();
   populateShopSelects();
@@ -217,6 +227,11 @@ async function goToPage(page) {
   document.querySelectorAll(".navbtn").forEach(b => b.classList.toggle("active", b.dataset.page === page));
   $("page-" + page).classList.remove("hidden");
   if (page === "dashboard") { await refreshSubmissions(); renderDashboard(); }
+  if (page === "schedule") {
+    if (!$("scheduleDate").value) $("scheduleDate").value = todayStr();
+    await Promise.all([refreshSubmissions(), refreshShops(), refreshAgents()]);
+    renderSchedule();
+  }
   if (page === "shops") { await refreshShops(); renderShopsList(); populateShopSelects(); }
   if (page === "users") { await refreshUsersList(); }
 }
@@ -230,6 +245,11 @@ async function refreshShops() {
 async function refreshSubmissions() {
   const snap = await getDocs(query(collection(db, "submissions"), orderBy("date", "desc")));
   state.submissions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+
+async function refreshAgents() {
+  const snap = await getDocs(query(collection(db, "users"), where("role", "==", "agent")));
+  state.agents = snap.docs.map(d => ({ uid: d.id, ...d.data() })).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 }
 
 function populateShopSelects() {
@@ -334,7 +354,7 @@ function renderDashboard() {
       : `<span class="loc-none">No location</span>`;
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${escapeHtml(s.date)}</td>
+      <td><div class="date-cell"><span class="d">${escapeHtml(formatDate(s.date))}</span><span class="t">${escapeHtml(formatTime(s.createdAt))}</span></div></td>
       <td>${escapeHtml(s.agentName)}</td>
       <td>${escapeHtml(s.shopName)}</td>
       <td><span class="badge badge-${s.shift}">${escapeHtml(shiftLabel)}</span></td>
@@ -385,14 +405,15 @@ $("refreshBtn").addEventListener("click", async () => {
 $("exportCsvBtn").addEventListener("click", () => {
   const rows = getFilteredSubmissions();
   if (rows.length === 0) { showToast("No entries to export."); return; }
-  const header = ["Date", "Agent Name", "Shop Name", "Shift", "Latitude", "Longitude", "Accuracy (m)", "Logged By"];
+  const header = ["Date", "Submitted At", "Agent Name", "Shop Name", "Shift", "Latitude", "Longitude", "Accuracy (m)", "Logged By"];
   const csvRows = [header.join(",")];
   rows.forEach(s => {
     const shiftLabel = s.shift === "Full" ? "Full day" : s.shift;
     const lat = s.location ? s.location.lat : "";
     const lng = s.location ? s.location.lng : "";
     const acc = s.location ? s.location.accuracy : "";
-    const line = [s.date, s.agentName, s.shopName, shiftLabel, lat, lng, acc, s.submittedByName || s.submittedBy]
+    const submittedAt = (s.createdAt && typeof s.createdAt.toDate === "function") ? s.createdAt.toDate().toLocaleString() : "";
+    const line = [s.date, submittedAt, s.agentName, s.shopName, shiftLabel, lat, lng, acc, s.submittedByName || s.submittedBy]
       .map(v => `"${String(v).replace(/"/g, '""')}"`).join(",");
     csvRows.push(line);
   });
@@ -403,6 +424,65 @@ $("exportCsvBtn").addEventListener("click", () => {
   a.click();
   URL.revokeObjectURL(url);
 });
+
+// ---------- Schedule ----------
+$("scheduleDate").addEventListener("change", renderSchedule);
+
+function renderSchedule() {
+  const date = $("scheduleDate").value || todayStr();
+  const dayEntries = state.submissions.filter(s => s.date === date);
+
+  // Group entries by shop
+  const byShop = new Map();
+  state.shops.forEach(shop => byShop.set(shop.name, []));
+  dayEntries.forEach(s => {
+    if (!byShop.has(s.shopName)) byShop.set(s.shopName, []);
+    byShop.get(s.shopName).push(s);
+  });
+
+  // Who worked today, by email (most reliable identifier)
+  const workedEmails = new Set(dayEntries.map(s => (s.submittedBy || "").toLowerCase()));
+  const offAgents = state.agents.filter(a => !workedEmails.has((a.email || "").toLowerCase()));
+
+  const shopsWrap = $("scheduleShops");
+  const shopNames = Array.from(byShop.keys()).sort((a, b) => a.localeCompare(b));
+  if (shopNames.length === 0) {
+    shopsWrap.innerHTML = `<div class="empty-state">No shops configured yet.</div>`;
+  } else {
+    shopsWrap.innerHTML = shopNames.map(shopName => {
+      const entries = byShop.get(shopName);
+      const chips = entries.length
+        ? entries.map(e => {
+            const shiftLabel = e.shift === "Full" ? "Full day" : e.shift;
+            return `<div class="agent-chip">${escapeHtml(e.agentName)} <span class="badge badge-${e.shift}">${escapeHtml(shiftLabel)}</span></div>`;
+          }).join("")
+        : `<span class="loc-none">No agents scheduled</span>`;
+      return `
+        <div class="shop-card">
+          <div class="shop-card-head">
+            <span class="name">${escapeHtml(shopName)}</span>
+            <span class="shop-count">${entries.length} agent${entries.length === 1 ? "" : "s"}</span>
+          </div>
+          <div class="agent-chips">${chips}</div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  const offWrap = $("scheduleOff");
+  offWrap.innerHTML = offAgents.length
+    ? `<div class="agent-chips">` + offAgents.map(a =>
+        `<div class="agent-chip">${escapeHtml(a.name || a.email)} <span class="badge badge-Off">Day off</span></div>`
+      ).join("") + `</div>`
+    : `<div class="empty-state">Everyone on the roster has a shift logged for this day.</div>`;
+
+  const shopsCovered = shopNames.filter(name => byShop.get(name).length > 0).length;
+  $("scheduleStatRow").innerHTML = `
+    <div class="stat-card"><div class="stat-num">${dayEntries.length}</div><div class="stat-label">Shifts logged</div></div>
+    <div class="stat-card"><div class="stat-num">${shopsCovered}</div><div class="stat-label">Shops covered</div></div>
+    <div class="stat-card"><div class="stat-num">${offAgents.length}</div><div class="stat-label">Agents off</div></div>
+  `;
+}
 
 // ---------- Shops management ----------
 function renderShopsList() {
