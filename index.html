@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>Agent Location Log</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- FIRST-TIME SETUP SCREEN (shown only if no users exist yet) -->
+  <div id="setupScreen" class="hidden">
+    <div class="login-wrap">
+      <div class="brand">
+        <div class="brand-mark">AL</div>
+        <div>
+          <div class="brand-text">Agent Location Log</div>
+          <div class="brand-sub">First-time setup</div>
+        </div>
+      </div>
+      <div class="card login-card">
+        <p class="login-title">Claim the first admin account</p>
+        <p class="login-desc">No users exist yet. Claim one of the two authorized admin emails to get started. You can add the second admin and all agents afterwards from the Users tab.</p>
+        <div id="setupError" class="error-msg hidden"></div>
+        <div class="field">
+          <label>Admin email</label>
+          <input type="email" id="setupEmail" placeholder="name@company.com">
+        </div>
+        <div class="field">
+          <label>Your name</label>
+          <input type="text" id="setupName" placeholder="Full name">
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="setupPassword" placeholder="Choose a password (min 6 characters)">
+        </div>
+        <button class="btn btn-primary login-submit" id="setupBtn">Create admin account</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOGIN SCREEN -->
+  <div id="loginScreen">
+    <div class="login-wrap">
+      <div class="brand">
+        <div class="brand-mark">AL</div>
+        <div>
+          <div class="brand-text">Agent Location Log</div>
+          <div class="brand-sub">Shift Tracking</div>
+        </div>
+      </div>
+      <div class="card login-card">
+        <p class="login-title">Sign in</p>
+        <p class="login-desc">Enter your credentials to log your shift or manage the roster.</p>
+        <div id="loginError" class="error-msg hidden"></div>
+        <div id="loginInfo" class="info-msg hidden"></div>
+        <div class="field">
+          <label>Email</label>
+          <input type="email" id="loginEmail" autocomplete="username" placeholder="name@company.com">
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="loginPassword" autocomplete="current-password" placeholder="••••••••">
+        </div>
+        <button class="btn btn-primary login-submit" id="loginBtn">Sign in</button>
+        <div class="switch-link"><a id="forgotPwLink">Forgot password?</a></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN APP -->
+  <div id="mainApp" class="hidden" style="display:flex; flex-direction:column; min-height:100vh;">
+    <header>
+      <div class="header-inner">
+        <div class="brand">
+          <div class="brand-mark" style="width:30px;height:30px;font-size:13px;">AL</div>
+          <div class="brand-text" style="font-size:15px;">Agent Location Log</div>
+        </div>
+        <div class="user-chip">
+          <span class="user-dot"></span>
+          <span id="currentUserName">—</span>
+          <span class="role-tag" id="currentUserRole">AGENT</span>
+          <button class="btn btn-ghost btn-sm" id="logoutBtn">Log out</button>
+        </div>
+      </div>
+      <nav id="navBar">
+        <button class="navbtn active" data-page="submit">Submit</button>
+        <button class="navbtn hidden" data-page="dashboard" id="navDashboard">Dashboard</button>
+        <button class="navbtn hidden" data-page="shops" id="navShops">Shops</button>
+        <button class="navbtn hidden" data-page="users" id="navUsers">Users</button>
+        <button class="navbtn" data-page="account">Account</button>
+      </nav>
+    </header>
+
+    <main>
+      <!-- SUBMIT PAGE -->
+      <div id="page-submit" class="page">
+        <p class="page-title">Submit shift location</p>
+        <p class="page-sub">Log where you're working today. We'll capture your GPS location automatically.</p>
+        <div class="card" style="max-width:480px;">
+          <div class="field">
+            <label>Date</label>
+            <input type="date" id="fDate">
+          </div>
+          <div class="field">
+            <label>Agent name</label>
+            <input type="text" id="fAgent" placeholder="Full name">
+          </div>
+          <div class="field">
+            <label>Shop</label>
+            <select id="fShop"></select>
+          </div>
+          <div class="field">
+            <label>Shift</label>
+            <div class="shift-row" id="shiftRow">
+              <div class="shift-opt" data-shift="AM">AM<small>Morning</small></div>
+              <div class="shift-opt" data-shift="PM">PM<small>Evening</small></div>
+              <div class="shift-opt" data-shift="Full">Full<small>All day</small></div>
+            </div>
+          </div>
+          <button class="btn btn-primary" id="submitFormBtn" style="width:100%; padding:12px; margin-top:6px;">Submit entry</button>
+          <div class="loc-status" id="locStatus"></div>
+        </div>
+      </div>
+
+      <!-- DASHBOARD PAGE (admin) -->
+      <div id="page-dashboard" class="page hidden">
+        <p class="page-title">Dashboard</p>
+        <p class="page-sub">All submitted shift entries, with GPS location where available.</p>
+        <div class="stat-row" id="statRow"></div>
+        <div class="filters">
+          <div class="field">
+            <label>From date</label>
+            <input type="date" id="filterFrom">
+          </div>
+          <div class="field">
+            <label>To date</label>
+            <input type="date" id="filterTo">
+          </div>
+          <div class="field">
+            <label>Shop</label>
+            <select id="filterShop"><option value="">All shops</option></select>
+          </div>
+          <div class="field">
+            <label>Shift</label>
+            <select id="filterShift">
+              <option value="">All shifts</option>
+              <option value="AM">AM</option>
+              <option value="PM">PM</option>
+              <option value="Full">Full day</option>
+            </select>
+          </div>
+          <div class="field" style="display:flex; align-items:flex-end; gap:8px;">
+            <button class="btn btn-sm" id="refreshBtn">Refresh</button>
+            <button class="btn btn-sm" id="clearFiltersBtn">Clear</button>
+            <button class="btn btn-sm btn-primary" id="exportCsvBtn">Export CSV</button>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr><th>Date</th><th>Agent</th><th>Shop</th><th>Shift</th><th>Location</th><th>Logged by</th><th></th></tr>
+            </thead>
+            <tbody id="dashboardBody"></tbody>
+          </table>
+        </div>
+        <div id="dashboardEmpty" class="empty-state hidden">No entries match these filters yet.</div>
+      </div>
+
+      <!-- SHOPS PAGE (admin) -->
+      <div id="page-shops" class="page hidden">
+        <p class="page-title">Manage shops</p>
+        <p class="page-sub">Add or remove shop locations agents can log against.</p>
+        <div class="card" style="margin-bottom:20px; max-width:480px;">
+          <div class="field" style="margin-bottom:12px;">
+            <label>New shop name</label>
+            <input type="text" id="newShopName" placeholder="e.g. EXP Suez3">
+          </div>
+          <button class="btn btn-primary" id="addShopBtn">Add shop</button>
+        </div>
+        <div id="shopsList"></div>
+      </div>
+
+      <!-- USERS PAGE (admin) -->
+      <div id="page-users" class="page hidden">
+        <p class="page-title">Manage users</p>
+        <p class="page-sub">Add agents or admins who can access this app.</p>
+        <div class="card" style="margin-bottom:20px; max-width:520px;">
+          <div class="grid-2">
+            <div class="field">
+              <label>Full name</label>
+              <input type="text" id="newUserName" placeholder="Full name">
+            </div>
+            <div class="field">
+              <label>Role</label>
+              <select id="newUserRole">
+                <option value="agent">Agent</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label>Email</label>
+            <input type="email" id="newUserEmail" placeholder="name@company.com">
+          </div>
+          <div class="field">
+            <label>Temporary password</label>
+            <input type="text" id="newUserPassword" placeholder="Set an initial password (min 6 characters)">
+          </div>
+          <button class="btn btn-primary" id="addUserBtn">Add user</button>
+        </div>
+        <div id="usersList"></div>
+      </div>
+
+      <!-- ACCOUNT PAGE -->
+      <div id="page-account" class="page hidden">
+        <p class="page-title">Account</p>
+        <p class="page-sub">Manage your own login.</p>
+        <div class="card" style="max-width:420px;">
+          <p style="font-size:13.5px; color:var(--text-dim); margin-top:0;">We'll email a password reset link to your address.</p>
+          <button class="btn btn-primary" id="accountResetBtn">Send password reset email</button>
+          <div id="accountMsg" class="hidden" style="margin-top:12px; font-size:13px; color:var(--success);">Reset email sent — check your inbox.</div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
