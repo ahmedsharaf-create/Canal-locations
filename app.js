@@ -27,6 +27,7 @@ let state = {
   shops: [],
   submissions: [],
   agents: [],
+  allUsers: [],
   selectedShift: null,
   capturedLocation: null,
   locating: false
@@ -230,6 +231,7 @@ async function goToPage(page) {
   if (page === "schedule") {
     if (!$("scheduleDate").value) $("scheduleDate").value = todayStr();
     await Promise.all([refreshSubmissions(), refreshShops(), refreshAgents()]);
+    populateScheduleShopFilter();
     renderSchedule();
   }
   if (page === "shops") { await refreshShops(); renderShopsList(); populateShopSelects(); }
@@ -256,6 +258,11 @@ function populateShopSelects() {
   const opts = state.shops.map(s => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}</option>`).join("");
   $("fShop").innerHTML = opts || `<option value="">No shops yet</option>`;
   $("filterShop").innerHTML = `<option value="">All shops</option>` + opts;
+}
+
+function populateScheduleShopFilter() {
+  const opts = state.shops.map(s => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}</option>`).join("");
+  $("scheduleShopFilter").innerHTML = `<option value="">All shops</option>` + opts;
 }
 
 // ---------- Submit form: geolocation + write ----------
@@ -427,27 +434,43 @@ $("exportCsvBtn").addEventListener("click", () => {
 
 // ---------- Schedule ----------
 $("scheduleDate").addEventListener("change", renderSchedule);
+$("scheduleShopFilter").addEventListener("change", renderSchedule);
+$("scheduleShiftFilter").addEventListener("change", renderSchedule);
+
+let lastScheduleReport = null; // cached data for the PDF export, refreshed on every render
 
 function renderSchedule() {
   const date = $("scheduleDate").value || todayStr();
-  const dayEntries = state.submissions.filter(s => s.date === date);
+  const shopFilter = $("scheduleShopFilter").value;
+  const shiftFilter = $("scheduleShiftFilter").value;
 
-  // Group entries by shop
+  const dayEntries = state.submissions.filter(s => s.date === date);
+  const filteredEntries = dayEntries.filter(s => {
+    if (shopFilter && s.shopName !== shopFilter) return false;
+    if (shiftFilter && s.shift !== shiftFilter) return false;
+    return true;
+  });
+
+  // Group the filtered entries by shop (day-off stays based on the full,
+  // unfiltered day — being off doesn't depend on which shop you're looking at)
   const byShop = new Map();
-  state.shops.forEach(shop => byShop.set(shop.name, []));
-  dayEntries.forEach(s => {
+  const shopsToShow = shopFilter ? state.shops.filter(s => s.name === shopFilter) : state.shops;
+  shopsToShow.forEach(shop => byShop.set(shop.name, []));
+  filteredEntries.forEach(s => {
     if (!byShop.has(s.shopName)) byShop.set(s.shopName, []);
     byShop.get(s.shopName).push(s);
   });
 
-  // Who worked today, by email (most reliable identifier)
+  // Who worked today, by email (most reliable identifier) — always based on
+  // the full unfiltered day so "day off" means off entirely, not just off
+  // for the currently filtered shop/shift.
   const workedEmails = new Set(dayEntries.map(s => (s.submittedBy || "").toLowerCase()));
   const offAgents = state.agents.filter(a => !workedEmails.has((a.email || "").toLowerCase()));
 
   const shopsWrap = $("scheduleShops");
   const shopNames = Array.from(byShop.keys()).sort((a, b) => a.localeCompare(b));
   if (shopNames.length === 0) {
-    shopsWrap.innerHTML = `<div class="empty-state">No shops configured yet.</div>`;
+    shopsWrap.innerHTML = `<div class="empty-state">No shops match this filter.</div>`;
   } else {
     shopsWrap.innerHTML = shopNames.map(shopName => {
       const entries = byShop.get(shopName);
@@ -478,10 +501,107 @@ function renderSchedule() {
 
   const shopsCovered = shopNames.filter(name => byShop.get(name).length > 0).length;
   $("scheduleStatRow").innerHTML = `
-    <div class="stat-card"><div class="stat-num">${dayEntries.length}</div><div class="stat-label">Shifts logged</div></div>
+    <div class="stat-card"><div class="stat-num">${filteredEntries.length}</div><div class="stat-label">Shifts logged</div></div>
     <div class="stat-card"><div class="stat-num">${shopsCovered}</div><div class="stat-label">Shops covered</div></div>
     <div class="stat-card"><div class="stat-num">${offAgents.length}</div><div class="stat-label">Agents off</div></div>
   `;
+
+  // Cache everything the PDF export needs so it always matches what's on screen.
+  lastScheduleReport = { date, shopFilter, shiftFilter, byShop, shopNames, offAgents };
+}
+
+$("scheduleDownloadBtn").addEventListener("click", downloadScheduleReport);
+
+function downloadScheduleReport() {
+  if (!lastScheduleReport) return;
+  if (!window.jspdf) { showToast("PDF library didn't load — check your connection and try again."); return; }
+  const { jsPDF } = window.jspdf;
+  const { date, shopFilter, shiftFilter, byShop, shopNames, offAgents } = lastScheduleReport;
+
+  const docPdf = new jsPDF({ unit: "pt", format: "a4" });
+  const pageWidth = docPdf.internal.pageSize.getWidth();
+  const margin = 40;
+
+  // Header
+  docPdf.setFillColor(15, 27, 45);
+  docPdf.rect(0, 0, pageWidth, 70, "F");
+  docPdf.setTextColor(255, 255, 255);
+  docPdf.setFont("helvetica", "bold");
+  docPdf.setFontSize(16);
+  docPdf.text("Agent Location Log — Schedule Report", margin, 32);
+  docPdf.setFont("helvetica", "normal");
+  docPdf.setFontSize(10);
+  docPdf.setTextColor(220, 220, 220);
+  docPdf.text(`Date: ${formatDate(date)}`, margin, 50);
+
+  let filterLine = [];
+  if (shopFilter) filterLine.push(`Shop: ${shopFilter}`);
+  if (shiftFilter) filterLine.push(`Shift: ${shiftFilter === "Full" ? "Full day" : shiftFilter}`);
+  filterLine.push(`Generated: ${new Date().toLocaleString()}`);
+  docPdf.text(filterLine.join("   •   "), margin, 63);
+
+  // Table rows: one per agent entry, grouped by shop
+  const rows = [];
+  shopNames.forEach(shopName => {
+    const entries = byShop.get(shopName);
+    if (entries.length === 0) {
+      rows.push([shopName, "—", "—"]);
+    } else {
+      entries.forEach((e, i) => {
+        const shiftLabel = e.shift === "Full" ? "Full day" : e.shift;
+        rows.push([i === 0 ? shopName : "", e.agentName, shiftLabel]);
+      });
+    }
+  });
+
+  docPdf.autoTable({
+    startY: 90,
+    margin: { left: margin, right: margin },
+    head: [["Shop", "Agent", "Shift"]],
+    body: rows,
+    theme: "grid",
+    headStyles: { fillColor: [30, 51, 80], textColor: 255, fontStyle: "bold" },
+    styles: { fontSize: 10, cellPadding: 6, textColor: [30, 30, 30] },
+    alternateRowStyles: { fillColor: [245, 247, 250] }
+  });
+
+  // Day off section
+  let y = docPdf.lastAutoTable.finalY + 24;
+  docPdf.setTextColor(30, 30, 30);
+  docPdf.setFont("helvetica", "bold");
+  docPdf.setFontSize(12);
+  docPdf.text("Day off", margin, y);
+  y += 6;
+
+  if (offAgents.length === 0) {
+    docPdf.setFont("helvetica", "normal");
+    docPdf.setFontSize(10);
+    docPdf.text("Everyone on the roster has a shift logged for this day.", margin, y + 16);
+  } else {
+    docPdf.autoTable({
+      startY: y + 10,
+      margin: { left: margin, right: margin },
+      head: [["Agent", "Status"]],
+      body: offAgents.map(a => [a.name || a.email, "Day off"]),
+      theme: "grid",
+      headStyles: { fillColor: [30, 51, 80], textColor: 255, fontStyle: "bold" },
+      styles: { fontSize: 10, cellPadding: 6, textColor: [30, 30, 30] },
+      alternateRowStyles: { fillColor: [245, 247, 250] }
+    });
+  }
+
+  // Footer with page numbers
+  const pageCount = docPdf.internal.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    docPdf.setPage(i);
+    docPdf.setFontSize(8);
+    docPdf.setTextColor(150, 150, 150);
+    docPdf.text(`Page ${i} of ${pageCount}`, pageWidth - margin, docPdf.internal.pageSize.getHeight() - 20, { align: "right" });
+  }
+
+  const filenameParts = ["schedule", date];
+  if (shopFilter) filenameParts.push(shopFilter.replace(/\s+/g, "-"));
+  docPdf.save(filenameParts.join("_") + ".pdf");
 }
 
 // ---------- Shops management ----------
@@ -534,9 +654,26 @@ $("addShopBtn").addEventListener("click", async () => {
 // ---------- Users management ----------
 async function refreshUsersList() {
   const snap = await getDocs(collection(db, "users"));
-  const users = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+  state.allUsers = snap.docs.map(d => ({ uid: d.id, ...d.data() }))
+    .sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+  renderUsersList();
+}
+
+function renderUsersList() {
+  const search = $("userSearch").value.trim().toLowerCase();
+  const roleFilter = $("userRoleFilter").value;
+  const users = state.allUsers.filter(u => {
+    if (roleFilter && u.role !== roleFilter) return false;
+    if (search) {
+      const hay = `${u.name || ""} ${u.email || ""}`.toLowerCase();
+      if (!hay.includes(search)) return false;
+    }
+    return true;
+  });
+
   const wrap = $("usersList");
-  if (users.length === 0) { wrap.innerHTML = `<div class="empty-state">No users yet.</div>`; return; }
+  if (state.allUsers.length === 0) { wrap.innerHTML = `<div class="empty-state">No users yet.</div>`; return; }
+  if (users.length === 0) { wrap.innerHTML = `<div class="empty-state">No users match this filter.</div>`; return; }
   wrap.innerHTML = users.map(u => `
     <div class="list-row">
       <div>
@@ -572,6 +709,9 @@ async function refreshUsersList() {
     });
   });
 }
+
+$("userSearch").addEventListener("input", renderUsersList);
+$("userRoleFilter").addEventListener("change", renderUsersList);
 
 $("addUserBtn").addEventListener("click", async () => {
   const name = $("newUserName").value.trim();

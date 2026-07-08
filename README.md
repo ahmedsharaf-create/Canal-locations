@@ -71,7 +71,19 @@ works on `localhost` for local testing.
 
 - **Dashboard** — every submission, filterable by date range / shop /
   shift, each with a "View map" link (opens Google Maps at the captured
-  coordinates) and CSV export (includes lat/lng/accuracy columns).
+  coordinates), a Date/Submitted column showing both the shift date and the
+  exact time it was logged, and CSV export (includes lat/lng/accuracy and
+  submitted-at columns).
+- **Schedule** — pick a date (and optionally filter by shop or shift) and
+  see, per shop, how many agents are scheduled and their shift (AM/PM/Full
+  day), plus a "Day off" section listing agents (role: Agent) who have no
+  entry logged for that date. This is based on who's actually signed in and
+  submitted, matched by their login email — not on typed-in names, so it
+  stays accurate even if two agents share a similar name. A **"Download
+  report (PDF)"** button exports the currently-filtered view as a branded,
+  print-ready PDF (shop/agent/shift table, day-off list, page numbers).
+- **Users** — search by name/email and filter by role (Admin/Agent) to
+  quickly find someone in a longer roster.
 - **Shops** — add or remove shop locations (the 13 you gave are pre-seeded
   on first run).
 - **Users** — add agents/admins (name, email, temp password) and send

@@ -180,6 +180,22 @@
             <label>Date</label>
             <input type="date" id="scheduleDate">
           </div>
+          <div class="field">
+            <label>Shop</label>
+            <select id="scheduleShopFilter"><option value="">All shops</option></select>
+          </div>
+          <div class="field">
+            <label>Shift</label>
+            <select id="scheduleShiftFilter">
+              <option value="">All shifts</option>
+              <option value="AM">AM</option>
+              <option value="PM">PM</option>
+              <option value="Full">Full day</option>
+            </select>
+          </div>
+          <div class="field" style="display:flex; align-items:flex-end;">
+            <button class="btn btn-primary" id="scheduleDownloadBtn">Download report (PDF)</button>
+          </div>
         </div>
         <div class="stat-row" id="scheduleStatRow"></div>
         <div class="section-head"><p class="page-title" style="font-size:16px; margin:0;">By shop</p></div>
@@ -229,6 +245,20 @@
             <input type="text" id="newUserPassword" placeholder="Set an initial password (min 6 characters)">
           </div>
           <button class="btn btn-primary" id="addUserBtn">Add user</button>
+        </div>
+        <div class="filters">
+          <div class="field">
+            <label>Search</label>
+            <input type="text" id="userSearch" placeholder="Search by name or email">
+          </div>
+          <div class="field" style="max-width:180px;">
+            <label>Role</label>
+            <select id="userRoleFilter">
+              <option value="">All roles</option>
+              <option value="admin">Admin</option>
+              <option value="agent">Agent</option>
+            </select>
+          </div>
         </div>
         <div id="usersList"></div>
       </div>
