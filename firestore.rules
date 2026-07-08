@@ -1,0 +1,45 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // users/{uid} — profile + role. Anyone signed in can read (needed to look
+    // up names in the dashboard); only admins or the user themself can write.
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+
+    // meta/setup — a single public flag so the logged-out app can tell
+    // whether first-time setup has already happened, without needing to
+    // read the (protected) users collection before anyone is signed in.
+    match /meta/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // shops/{id} — read by anyone signed in, only admins can add/remove.
+    match /shops/{shopId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // submissions/{id} — any signed-in user can create their own entry and
+    // read the list; only admins can delete entries from the dashboard.
+    match /submissions/{subId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+  }
+}
