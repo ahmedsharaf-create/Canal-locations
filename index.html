@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
 <title>Agent Location Log</title>
 <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 </head>
 <body>
 <div id="app">
@@ -87,6 +89,7 @@
       <nav id="navBar">
         <button class="navbtn active" data-page="submit">Submit</button>
         <button class="navbtn hidden" data-page="dashboard" id="navDashboard">Dashboard</button>
+        <button class="navbtn hidden" data-page="schedule" id="navSchedule">Schedule</button>
         <button class="navbtn hidden" data-page="shops" id="navShops">Shops</button>
         <button class="navbtn hidden" data-page="users" id="navUsers">Users</button>
         <button class="navbtn" data-page="account">Account</button>
@@ -160,12 +163,29 @@
         <div class="table-scroll">
           <table>
             <thead>
-              <tr><th>Date</th><th>Agent</th><th>Shop</th><th>Shift</th><th>Location</th><th>Logged by</th><th></th></tr>
+              <tr><th>Date / Submitted</th><th>Agent</th><th>Shop</th><th>Shift</th><th>Location</th><th>Logged by</th><th></th></tr>
             </thead>
             <tbody id="dashboardBody"></tbody>
           </table>
         </div>
         <div id="dashboardEmpty" class="empty-state hidden">No entries match these filters yet.</div>
+      </div>
+
+      <!-- SCHEDULE PAGE (admin) -->
+      <div id="page-schedule" class="page hidden">
+        <p class="page-title">Schedule</p>
+        <p class="page-sub">Agents per shop for a given day, and who's off.</p>
+        <div class="filters">
+          <div class="field" style="max-width:220px;">
+            <label>Date</label>
+            <input type="date" id="scheduleDate">
+          </div>
+        </div>
+        <div class="stat-row" id="scheduleStatRow"></div>
+        <div class="section-head"><p class="page-title" style="font-size:16px; margin:0;">By shop</p></div>
+        <div id="scheduleShops"></div>
+        <div class="section-head" style="margin-top:24px;"><p class="page-title" style="font-size:16px; margin:0;">Day off</p></div>
+        <div id="scheduleOff"></div>
       </div>
 
       <!-- SHOPS PAGE (admin) -->
