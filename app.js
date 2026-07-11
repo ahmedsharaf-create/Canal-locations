@@ -201,21 +201,6 @@ function friendlyAuthError(e) {
 }
 
 function isAdmin() { return state.profile && state.profile.role === "admin"; }
-function isManager() { return state.profile && state.profile.role === "manager"; }
-
-// Shops a Shop Manager is scoped to. Returns null for admins/agents (no restriction).
-function getVisibleShopNames() {
-  if (isManager()) return new Set(state.profile.managedShops || []);
-  return null;
-}
-
-// The base set of submissions a user is allowed to see in Dashboard/Schedule —
-// everything for admins, only their assigned shops for managers.
-function getScopedSubmissions() {
-  const visible = getVisibleShopNames();
-  if (!visible) return state.submissions;
-  return state.submissions.filter(s => visible.has(s.shopName));
-}
 
 async function enterApp() {
   $("setupScreen").classList.add("hidden");
@@ -226,8 +211,7 @@ async function enterApp() {
   $("fAgent").value = state.profile.name || "";
   $("fDate").value = todayStr();
 
-  ["navDashboard", "navSchedule"].forEach(id => $(id).classList.toggle("hidden", !(isAdmin() || isManager())));
-  ["navShops", "navUsers"].forEach(id => $(id).classList.toggle("hidden", !isAdmin()));
+  ["navDashboard", "navSchedule", "navShops", "navUsers"].forEach(id => $(id).classList.toggle("hidden", !isAdmin()));
 
   await refreshShops();
   populateShopSelects();
@@ -274,17 +258,11 @@ async function refreshAgents() {
 function populateShopSelects() {
   const opts = state.shops.map(s => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}</option>`).join("");
   $("fShop").innerHTML = opts || `<option value="">No shops yet</option>`;
-
-  const visible = getVisibleShopNames();
-  const filterShops = visible ? state.shops.filter(s => visible.has(s.name)) : state.shops;
-  const filterOpts = filterShops.map(s => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}</option>`).join("");
-  $("filterShop").innerHTML = `<option value="">All shops</option>` + filterOpts;
+  $("filterShop").innerHTML = `<option value="">All shops</option>` + opts;
 }
 
 function populateScheduleShopFilter() {
-  const visible = getVisibleShopNames();
-  const shops = visible ? state.shops.filter(s => visible.has(s.name)) : state.shops;
-  const opts = shops.map(s => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}</option>`).join("");
+  const opts = state.shops.map(s => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}</option>`).join("");
   $("scheduleShopFilter").innerHTML = `<option value="">All shops</option>` + opts;
 }
 
@@ -366,7 +344,7 @@ function getFilteredSubmissions() {
   const to = $("filterTo").value;
   const shop = $("filterShop").value;
   const shift = $("filterShift").value;
-  return getScopedSubmissions().filter(s => {
+  return state.submissions.filter(s => {
     if (from && s.date < from) return false;
     if (to && s.date > to) return false;
     if (shop && s.shopName !== shop) return false;
@@ -416,11 +394,10 @@ function renderDashboard() {
     });
   });
 
-  const scoped = getScopedSubmissions();
-  const total = scoped.length;
-  const withLocation = scoped.filter(s => s.location).length;
-  const uniqueAgents = new Set(scoped.map(s => s.agentName.toLowerCase())).size;
-  const todayCount = scoped.filter(s => s.date === todayStr()).length;
+  const total = state.submissions.length;
+  const withLocation = state.submissions.filter(s => s.location).length;
+  const uniqueAgents = new Set(state.submissions.map(s => s.agentName.toLowerCase())).size;
+  const todayCount = state.submissions.filter(s => s.date === todayStr()).length;
   $("statRow").innerHTML = `
     <div class="stat-card"><div class="stat-num">${total}</div><div class="stat-label">Total entries</div></div>
     <div class="stat-card"><div class="stat-num">${todayCount}</div><div class="stat-label">Logged today</div></div>
@@ -510,10 +487,8 @@ function renderSchedule() {
   const date = $("scheduleDate").value || todayStr();
   const shopFilter = $("scheduleShopFilter").value;
   const shiftFilter = $("scheduleShiftFilter").value;
-  const visible = getVisibleShopNames();
 
-  const scoped = getScopedSubmissions();
-  const dayEntries = scoped.filter(s => s.date === date);
+  const dayEntries = state.submissions.filter(s => s.date === date);
   const filteredEntries = dayEntries.filter(s => {
     if (shopFilter && s.shopName !== shopFilter) return false;
     if (shiftFilter && s.shift !== shiftFilter) return false;
@@ -523,8 +498,7 @@ function renderSchedule() {
   // Group the filtered entries by shop (day-off stays based on the full,
   // unfiltered day — being off doesn't depend on which shop you're looking at)
   const byShop = new Map();
-  let shopsToShow = shopFilter ? state.shops.filter(s => s.name === shopFilter) : state.shops;
-  if (visible) shopsToShow = shopsToShow.filter(s => visible.has(s.name));
+  const shopsToShow = shopFilter ? state.shops.filter(s => s.name === shopFilter) : state.shops;
   shopsToShow.forEach(shop => byShop.set(shop.name, []));
   filteredEntries.forEach(s => {
     if (!byShop.has(s.shopName)) byShop.set(s.shopName, []);
@@ -535,12 +509,7 @@ function renderSchedule() {
   // the full unfiltered day so "day off" means off entirely, not just off
   // for the currently filtered shop/shift.
   const workedEmails = new Set(dayEntries.map(s => (s.submittedBy || "").toLowerCase()));
-  let relevantAgents = state.agents;
-  if (visible) {
-    const everWorkedTheseShops = new Set(scoped.map(s => (s.submittedBy || "").toLowerCase()));
-    relevantAgents = state.agents.filter(a => everWorkedTheseShops.has((a.email || "").toLowerCase()));
-  }
-  const offAgents = relevantAgents.filter(a => !workedEmails.has((a.email || "").toLowerCase()));
+  const offAgents = state.agents.filter(a => !workedEmails.has((a.email || "").toLowerCase()));
 
   const shopsWrap = $("scheduleShops");
   const shopNames = Array.from(byShop.keys()).sort((a, b) => a.localeCompare(b));
@@ -754,7 +723,6 @@ function renderUsersList() {
       <div>
         <div class="name">${escapeHtml(u.name || u.email)} <span class="role-tag">${u.role.toUpperCase()}</span></div>
         <div class="meta">${escapeHtml(u.email)}</div>
-        ${u.role === "manager" && (u.managedShops || []).length ? `<div class="meta">Manages: ${escapeHtml(u.managedShops.join(", "))}</div>` : ""}
       </div>
       <div style="display:flex; gap:8px;">
         <button class="btn btn-teal btn-sm reset-pw" data-email="${escapeHtml(u.email)}">Send reset email</button>
@@ -789,25 +757,6 @@ function renderUsersList() {
 $("userSearch").addEventListener("input", renderUsersList);
 $("userRoleFilter").addEventListener("change", renderUsersList);
 
-function populateManagedShopsCheckboxes() {
-  const wrap = $("managedShopsCheckboxes");
-  if (state.shops.length === 0) {
-    wrap.innerHTML = `<span class="loc-none">No shops configured yet — add one on the Shops tab first.</span>`;
-    return;
-  }
-  wrap.innerHTML = state.shops.map(s => `
-    <label class="shop-checkbox-item">
-      <input type="checkbox" value="${escapeHtml(s.name)}"> ${escapeHtml(s.name)}
-    </label>
-  `).join("");
-}
-
-$("newUserRole").addEventListener("change", () => {
-  const isMgr = $("newUserRole").value === "manager";
-  $("managedShopsField").classList.toggle("hidden", !isMgr);
-  if (isMgr) populateManagedShopsCheckboxes();
-});
-
 $("addUserBtn").addEventListener("click", async () => {
   const name = $("newUserName").value.trim();
   const email = $("newUserEmail").value.trim().toLowerCase();
@@ -815,12 +764,6 @@ $("addUserBtn").addEventListener("click", async () => {
   const password = $("newUserPassword").value;
   if (!name || !email || !password) { showToast("Fill in name, email, and password."); return; }
   if (password.length < 6) { showToast("Password must be at least 6 characters."); return; }
-
-  let managedShops = [];
-  if (role === "manager") {
-    managedShops = Array.from($("managedShopsCheckboxes").querySelectorAll("input:checked")).map(el => el.value);
-    if (managedShops.length === 0) { showToast("Select at least one shop for this manager."); return; }
-  }
 
   $("addUserBtn").disabled = true;
   try {
@@ -830,12 +773,8 @@ $("addUserBtn").addEventListener("click", async () => {
     const newUid = cred.user.uid;
     await signOut(secondaryAuth);
     // Write the profile using the primary (admin-authenticated) Firestore connection.
-    const profileDoc = { email, name, role };
-    if (role === "manager") profileDoc.managedShops = managedShops;
-    await setDoc(doc(db, "users", newUid), profileDoc);
+    await setDoc(doc(db, "users", newUid), { email, name, role });
     $("newUserName").value = ""; $("newUserEmail").value = ""; $("newUserPassword").value = "";
-    $("newUserRole").value = "agent";
-    $("managedShopsField").classList.add("hidden");
     await refreshUsersList();
     showToast("User added.");
   } catch (e) {
