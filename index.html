@@ -86,6 +86,7 @@
       </div>
       <nav id="navBar">
         <button class="navbtn active" data-page="submit">Submit</button>
+        <button class="navbtn" data-page="mysubmissions">My Submissions</button>
         <button class="navbtn hidden" data-page="dashboard" id="navDashboard">Dashboard</button>
         <button class="navbtn hidden" data-page="schedule" id="navSchedule">Schedule</button>
         <button class="navbtn hidden" data-page="shops" id="navShops">Shops</button>
@@ -98,7 +99,7 @@
       <!-- SUBMIT PAGE -->
       <div id="page-submit" class="page">
         <p class="page-title">Submit shift location</p>
-        <p class="page-sub">Log where you're working today. We'll capture your GPS location automatically.</p>
+        <p class="page-sub">Log where you're working today. Location access is required to submit.</p>
         <div class="card" style="max-width:480px;">
           <div class="field">
             <label>Date</label>
@@ -123,6 +124,22 @@
           <button class="btn btn-primary" id="submitFormBtn" style="width:100%; padding:12px; margin-top:6px;">Submit entry</button>
           <div class="loc-status" id="locStatus"></div>
         </div>
+      </div>
+
+      <!-- MY SUBMISSIONS PAGE (everyone) -->
+      <div id="page-mysubmissions" class="page hidden">
+        <p class="page-title">My submissions</p>
+        <p class="page-sub">Your own shift entries, newest first.</p>
+        <div class="stat-row" id="myStatRow"></div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr><th>Date / Submitted</th><th>Shop</th><th>Shift</th><th>Location</th></tr>
+            </thead>
+            <tbody id="myDashboardBody"></tbody>
+          </table>
+        </div>
+        <div id="myDashboardEmpty" class="empty-state hidden">You haven't submitted any entries yet.</div>
       </div>
 
       <!-- DASHBOARD PAGE (admin) -->

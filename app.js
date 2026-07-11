@@ -228,6 +228,7 @@ async function goToPage(page) {
   document.querySelectorAll(".navbtn").forEach(b => b.classList.toggle("active", b.dataset.page === page));
   $("page-" + page).classList.remove("hidden");
   if (page === "dashboard") { await refreshSubmissions(); renderDashboard(); }
+  if (page === "mysubmissions") { await refreshSubmissions(); renderMyDashboard(); }
   if (page === "schedule") {
     if (!$("scheduleDate").value) $("scheduleDate").value = todayStr();
     await Promise.all([refreshSubmissions(), refreshShops(), refreshAgents()]);
@@ -245,7 +246,7 @@ async function refreshShops() {
 }
 
 async function refreshSubmissions() {
-  const snap = await getDocs(query(collection(db, "submissions"), orderBy("date", "desc")));
+  const snap = await getDocs(query(collection(db, "submissions"), orderBy("createdAt", "desc")));
   state.submissions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
@@ -275,8 +276,8 @@ document.querySelectorAll(".shift-opt").forEach(el => {
 });
 
 function captureLocation() {
-  return new Promise((resolve) => {
-    if (!("geolocation" in navigator)) { resolve(null); return; }
+  if (!("geolocation" in navigator)) return Promise.resolve(null);
+  const getPosition = (options) => new Promise((resolve) => {
     navigator.geolocation.getCurrentPosition(
       pos => resolve({
         lat: pos.coords.latitude,
@@ -284,9 +285,11 @@ function captureLocation() {
         accuracy: Math.round(pos.coords.accuracy)
       }),
       () => resolve(null),
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      options
     );
   });
+  return getPosition({ enableHighAccuracy: true, timeout: 12000, maximumAge: 0 })
+    .then(loc => loc || getPosition({ enableHighAccuracy: false, timeout: 8000, maximumAge: 30000 }));
 }
 
 $("submitFormBtn").addEventListener("click", async () => {
@@ -306,18 +309,20 @@ $("submitFormBtn").addEventListener("click", async () => {
   statusEl.innerHTML = `<span class="spinner"></span> Getting your location…`;
 
   const location = await captureLocation();
-  if (location) {
-    statusEl.className = "loc-status ok";
-    statusEl.textContent = `Location captured (±${location.accuracy}m).`;
-  } else {
+  if (!location) {
     statusEl.className = "loc-status err";
-    statusEl.textContent = "Couldn't get your location — submitting without it. Allow location access to include it next time.";
+    statusEl.textContent = "We couldn't get your location. Please enable location access for this site and try again — location is required to submit.";
+    showToast("Location is required to submit an entry.");
+    $("submitFormBtn").disabled = false;
+    return;
   }
+  statusEl.className = "loc-status ok";
+  statusEl.textContent = `Location captured (±${location.accuracy}m).`;
 
   try {
     await addDoc(collection(db, "submissions"), {
       date, agentName: agent, shopName: shop, shift,
-      location: location || null,
+      location,
       submittedBy: state.profile.email,
       submittedByName: state.profile.name || state.profile.email,
       createdAt: serverTimestamp()
@@ -345,7 +350,11 @@ function getFilteredSubmissions() {
     if (shop && s.shopName !== shop) return false;
     if (shift && s.shift !== shift) return false;
     return true;
-  });
+  }).sort((a, b) => tsMillis(b.createdAt) - tsMillis(a.createdAt));
+}
+
+function tsMillis(timestamp) {
+  return (timestamp && typeof timestamp.toDate === "function") ? timestamp.toDate().getTime() : 0;
 }
 
 function renderDashboard() {
@@ -393,6 +402,41 @@ function renderDashboard() {
     <div class="stat-card"><div class="stat-num">${total}</div><div class="stat-label">Total entries</div></div>
     <div class="stat-card"><div class="stat-num">${todayCount}</div><div class="stat-label">Logged today</div></div>
     <div class="stat-card"><div class="stat-num">${uniqueAgents}</div><div class="stat-label">Agents</div></div>
+    <div class="stat-card"><div class="stat-num">${withLocation}</div><div class="stat-label">With GPS location</div></div>
+  `;
+}
+
+// ---------- My Submissions (agent's own view) ----------
+function renderMyDashboard() {
+  const mine = state.submissions
+    .filter(s => (s.submittedBy || "").toLowerCase() === (state.profile.email || "").toLowerCase())
+    .sort((a, b) => tsMillis(b.createdAt) - tsMillis(a.createdAt));
+
+  const body = $("myDashboardBody");
+  body.innerHTML = "";
+  $("myDashboardEmpty").classList.toggle("hidden", mine.length > 0);
+
+  mine.forEach(s => {
+    const shiftLabel = s.shift === "Full" ? "Full day" : s.shift;
+    const loc = s.location
+      ? `<a class="loc-pill" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${s.location.lat},${s.location.lng}">📍 View map</a>`
+      : `<span class="loc-none">No location</span>`;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><div class="date-cell"><span class="d">${escapeHtml(formatDate(s.date))}</span><span class="t">${escapeHtml(formatTime(s.createdAt))}</span></div></td>
+      <td>${escapeHtml(s.shopName)}</td>
+      <td><span class="badge badge-${s.shift}">${escapeHtml(shiftLabel)}</span></td>
+      <td>${loc}</td>
+    `;
+    body.appendChild(tr);
+  });
+
+  const total = mine.length;
+  const withLocation = mine.filter(s => s.location).length;
+  const thisMonth = mine.filter(s => s.date && s.date.slice(0, 7) === todayStr().slice(0, 7)).length;
+  $("myStatRow").innerHTML = `
+    <div class="stat-card"><div class="stat-num">${total}</div><div class="stat-label">Total entries</div></div>
+    <div class="stat-card"><div class="stat-num">${thisMonth}</div><div class="stat-label">This month</div></div>
     <div class="stat-card"><div class="stat-num">${withLocation}</div><div class="stat-label">With GPS location</div></div>
   `;
 }
