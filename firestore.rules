@@ -10,6 +10,13 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
+    // Someone editing only the shopName field on their own submission —
+    // used so agents can fix a wrong shop pick without full edit rights.
+    function isOwnerFixingShop() {
+      return isSignedIn() &&
+        resource.data.submittedBy == request.auth.token.email &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['shopName']);
+    }
 
     // users/{uid} — profile + role. Anyone signed in can read (needed to look
     // up names in the dashboard); only admins or the user themself can write.
@@ -38,7 +45,7 @@ service cloud.firestore {
     match /submissions/{subId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
-      allow update: if isAdmin();
+      allow update: if isAdmin() || isOwnerFixingShop();
       allow delete: if isAdmin();
     }
   }

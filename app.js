@@ -4,7 +4,7 @@ import {
   createUserWithEmailAndPassword, sendPasswordResetEmail
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
-  getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, deleteDoc,
+  getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, updateDoc,
   query, where, orderBy, serverTimestamp, limit
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { firebaseConfig, ADMIN_EMAILS, DEFAULT_SHOPS } from "./firebase-config.js";
@@ -201,6 +201,21 @@ function friendlyAuthError(e) {
 }
 
 function isAdmin() { return state.profile && state.profile.role === "admin"; }
+function isManager() { return state.profile && state.profile.role === "manager"; }
+
+// Shops a Shop Manager is scoped to. Returns null for admins/agents (no restriction).
+function getVisibleShopNames() {
+  if (isManager()) return new Set(state.profile.managedShops || []);
+  return null;
+}
+
+// The base set of submissions a user is allowed to see in Dashboard/Schedule —
+// everything for admins, only their assigned shops for managers.
+function getScopedSubmissions() {
+  const visible = getVisibleShopNames();
+  if (!visible) return state.submissions;
+  return state.submissions.filter(s => visible.has(s.shopName));
+}
 
 async function enterApp() {
   $("setupScreen").classList.add("hidden");
@@ -211,7 +226,8 @@ async function enterApp() {
   $("fAgent").value = state.profile.name || "";
   $("fDate").value = todayStr();
 
-  ["navDashboard", "navSchedule", "navShops", "navUsers"].forEach(id => $(id).classList.toggle("hidden", !isAdmin()));
+  ["navDashboard", "navSchedule"].forEach(id => $(id).classList.toggle("hidden", !(isAdmin() || isManager())));
+  ["navShops", "navUsers"].forEach(id => $(id).classList.toggle("hidden", !isAdmin()));
 
   await refreshShops();
   populateShopSelects();
@@ -228,7 +244,7 @@ async function goToPage(page) {
   document.querySelectorAll(".navbtn").forEach(b => b.classList.toggle("active", b.dataset.page === page));
   $("page-" + page).classList.remove("hidden");
   if (page === "dashboard") { await refreshSubmissions(); renderDashboard(); }
-  if (page === "mysubmissions") { await refreshSubmissions(); renderMyDashboard(); }
+  if (page === "mysubmissions") { await Promise.all([refreshSubmissions(), refreshShops()]); renderMyDashboard(); }
   if (page === "schedule") {
     if (!$("scheduleDate").value) $("scheduleDate").value = todayStr();
     await Promise.all([refreshSubmissions(), refreshShops(), refreshAgents()]);
@@ -258,11 +274,17 @@ async function refreshAgents() {
 function populateShopSelects() {
   const opts = state.shops.map(s => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}</option>`).join("");
   $("fShop").innerHTML = opts || `<option value="">No shops yet</option>`;
-  $("filterShop").innerHTML = `<option value="">All shops</option>` + opts;
+
+  const visible = getVisibleShopNames();
+  const filterShops = visible ? state.shops.filter(s => visible.has(s.name)) : state.shops;
+  const filterOpts = filterShops.map(s => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}</option>`).join("");
+  $("filterShop").innerHTML = `<option value="">All shops</option>` + filterOpts;
 }
 
 function populateScheduleShopFilter() {
-  const opts = state.shops.map(s => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}</option>`).join("");
+  const visible = getVisibleShopNames();
+  const shops = visible ? state.shops.filter(s => visible.has(s.name)) : state.shops;
+  const opts = shops.map(s => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}</option>`).join("");
   $("scheduleShopFilter").innerHTML = `<option value="">All shops</option>` + opts;
 }
 
@@ -306,6 +328,35 @@ $("submitFormBtn").addEventListener("click", async () => {
 
   $("submitFormBtn").disabled = true;
   statusEl.className = "loc-status";
+  statusEl.textContent = "Checking today's entries…";
+
+  try {
+    const existingSnap = await getDocs(query(
+      collection(db, "submissions"),
+      where("submittedBy", "==", state.profile.email),
+      where("date", "==", date)
+    ));
+    const existingShifts = existingSnap.docs.map(d => d.data().shift);
+    const isDuplicate = shift === "Full"
+      ? existingShifts.length > 0
+      : existingShifts.includes(shift) || existingShifts.includes("Full");
+
+    if (isDuplicate) {
+      statusEl.className = "loc-status err";
+      statusEl.textContent = "You've already logged a shift for this date. Edit it from \"My Submissions\" instead of adding another.";
+      showToast("You've already submitted a shift for this date.");
+      $("submitFormBtn").disabled = false;
+      return;
+    }
+  } catch (e) {
+    console.error(e);
+    statusEl.className = "loc-status err";
+    statusEl.textContent = "Couldn't verify today's entries — check your connection and try again.";
+    $("submitFormBtn").disabled = false;
+    return;
+  }
+
+  statusEl.className = "loc-status";
   statusEl.innerHTML = `<span class="spinner"></span> Getting your location…`;
 
   const location = await captureLocation();
@@ -344,7 +395,7 @@ function getFilteredSubmissions() {
   const to = $("filterTo").value;
   const shop = $("filterShop").value;
   const shift = $("filterShift").value;
-  return state.submissions.filter(s => {
+  return getScopedSubmissions().filter(s => {
     if (from && s.date < from) return false;
     if (to && s.date > to) return false;
     if (shop && s.shopName !== shop) return false;
@@ -394,10 +445,11 @@ function renderDashboard() {
     });
   });
 
-  const total = state.submissions.length;
-  const withLocation = state.submissions.filter(s => s.location).length;
-  const uniqueAgents = new Set(state.submissions.map(s => s.agentName.toLowerCase())).size;
-  const todayCount = state.submissions.filter(s => s.date === todayStr()).length;
+  const scoped = getScopedSubmissions();
+  const total = scoped.length;
+  const withLocation = scoped.filter(s => s.location).length;
+  const uniqueAgents = new Set(scoped.map(s => s.agentName.toLowerCase())).size;
+  const todayCount = scoped.filter(s => s.date === todayStr()).length;
   $("statRow").innerHTML = `
     <div class="stat-card"><div class="stat-num">${total}</div><div class="stat-label">Total entries</div></div>
     <div class="stat-card"><div class="stat-num">${todayCount}</div><div class="stat-label">Logged today</div></div>
@@ -427,8 +479,13 @@ function renderMyDashboard() {
       <td>${escapeHtml(s.shopName)}</td>
       <td><span class="badge badge-${s.shift}">${escapeHtml(shiftLabel)}</span></td>
       <td>${loc}</td>
+      <td><button class="btn btn-ghost btn-sm edit-my-shop" data-id="${s.id}" data-shop="${escapeHtml(s.shopName)}">Edit shop</button></td>
     `;
     body.appendChild(tr);
+  });
+
+  document.querySelectorAll(".edit-my-shop").forEach(btn => {
+    btn.addEventListener("click", () => openEditShopModal(btn.dataset.id, btn.dataset.shop));
   });
 
   const total = mine.length;
@@ -439,6 +496,45 @@ function renderMyDashboard() {
     <div class="stat-card"><div class="stat-num">${thisMonth}</div><div class="stat-label">This month</div></div>
     <div class="stat-card"><div class="stat-num">${withLocation}</div><div class="stat-label">With GPS location</div></div>
   `;
+}
+
+function openEditShopModal(submissionId, currentShop) {
+  const bg = document.createElement("div");
+  bg.className = "modal-bg";
+  const opts = state.shops.map(s =>
+    `<option value="${escapeHtml(s.name)}" ${s.name === currentShop ? "selected" : ""}>${escapeHtml(s.name)}</option>`
+  ).join("");
+  bg.innerHTML = `
+    <div class="modal">
+      <h3>Fix shop</h3>
+      <p style="font-size:13px; color:var(--text-dim); margin-top:-8px;">Picked the wrong shop by mistake? Correct it here.</p>
+      <div class="field">
+        <label>Shop</label>
+        <select id="editShopSelect">${opts}</select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="editShopCancel">Cancel</button>
+        <button class="btn btn-primary" id="editShopSave">Save</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(bg);
+  bg.querySelector("#editShopCancel").addEventListener("click", () => bg.remove());
+  bg.querySelector("#editShopSave").addEventListener("click", async () => {
+    const newShop = bg.querySelector("#editShopSelect").value;
+    if (!newShop) { bg.remove(); return; }
+    try {
+      await updateDoc(doc(db, "submissions", submissionId), { shopName: newShop });
+      const s = state.submissions.find(x => x.id === submissionId);
+      if (s) s.shopName = newShop;
+      renderMyDashboard();
+      showToast("Shop updated.");
+    } catch (e) {
+      console.error(e);
+      showToast("Couldn't update — you can only edit your own recent entries.");
+    }
+    bg.remove();
+  });
 }
 
 ["filterFrom", "filterTo", "filterShop", "filterShift"].forEach(id => {
@@ -481,14 +577,14 @@ $("scheduleDate").addEventListener("change", renderSchedule);
 $("scheduleShopFilter").addEventListener("change", renderSchedule);
 $("scheduleShiftFilter").addEventListener("change", renderSchedule);
 
-let lastScheduleReport = null; // cached data for the PDF export, refreshed on every render
-
 function renderSchedule() {
   const date = $("scheduleDate").value || todayStr();
   const shopFilter = $("scheduleShopFilter").value;
   const shiftFilter = $("scheduleShiftFilter").value;
+  const visible = getVisibleShopNames();
 
-  const dayEntries = state.submissions.filter(s => s.date === date);
+  const scoped = getScopedSubmissions();
+  const dayEntries = scoped.filter(s => s.date === date);
   const filteredEntries = dayEntries.filter(s => {
     if (shopFilter && s.shopName !== shopFilter) return false;
     if (shiftFilter && s.shift !== shiftFilter) return false;
@@ -498,7 +594,8 @@ function renderSchedule() {
   // Group the filtered entries by shop (day-off stays based on the full,
   // unfiltered day — being off doesn't depend on which shop you're looking at)
   const byShop = new Map();
-  const shopsToShow = shopFilter ? state.shops.filter(s => s.name === shopFilter) : state.shops;
+  let shopsToShow = shopFilter ? state.shops.filter(s => s.name === shopFilter) : state.shops;
+  if (visible) shopsToShow = shopsToShow.filter(s => visible.has(s.name));
   shopsToShow.forEach(shop => byShop.set(shop.name, []));
   filteredEntries.forEach(s => {
     if (!byShop.has(s.shopName)) byShop.set(s.shopName, []);
@@ -509,7 +606,12 @@ function renderSchedule() {
   // the full unfiltered day so "day off" means off entirely, not just off
   // for the currently filtered shop/shift.
   const workedEmails = new Set(dayEntries.map(s => (s.submittedBy || "").toLowerCase()));
-  const offAgents = state.agents.filter(a => !workedEmails.has((a.email || "").toLowerCase()));
+  let relevantAgents = state.agents;
+  if (visible) {
+    const everWorkedTheseShops = new Set(scoped.map(s => (s.submittedBy || "").toLowerCase()));
+    relevantAgents = state.agents.filter(a => everWorkedTheseShops.has((a.email || "").toLowerCase()));
+  }
+  const offAgents = relevantAgents.filter(a => !workedEmails.has((a.email || "").toLowerCase()));
 
   const shopsWrap = $("scheduleShops");
   const shopNames = Array.from(byShop.keys()).sort((a, b) => a.localeCompare(b));
@@ -549,103 +651,190 @@ function renderSchedule() {
     <div class="stat-card"><div class="stat-num">${shopsCovered}</div><div class="stat-label">Shops covered</div></div>
     <div class="stat-card"><div class="stat-num">${offAgents.length}</div><div class="stat-label">Agents off</div></div>
   `;
-
-  // Cache everything the PDF export needs so it always matches what's on screen.
-  lastScheduleReport = { date, shopFilter, shiftFilter, byShop, shopNames, offAgents };
 }
 
-$("scheduleDownloadBtn").addEventListener("click", downloadScheduleReport);
+$("scheduleDownloadBtn").addEventListener("click", downloadScheduleImage);
 
-function downloadScheduleReport() {
-  if (!lastScheduleReport) return;
-  if (!window.jspdf) { showToast("PDF library didn't load — check your connection and try again."); return; }
-  const { jsPDF } = window.jspdf;
-  const { date, shopFilter, shiftFilter, byShop, shopNames, offAgents } = lastScheduleReport;
+// Builds the data set for the image export. Unlike the on-screen view, when
+// filtering by AM or PM this also includes Full-day agents (they're working
+// that half of the day too), and it never includes the Day-off list.
+function buildScheduleExportData() {
+  const date = $("scheduleDate").value || todayStr();
+  const shopFilter = $("scheduleShopFilter").value;
+  const shiftFilter = $("scheduleShiftFilter").value;
+  const visible = getVisibleShopNames();
 
-  const docPdf = new jsPDF({ unit: "pt", format: "a4" });
-  const pageWidth = docPdf.internal.pageSize.getWidth();
-  const margin = 40;
+  const scoped = getScopedSubmissions();
+  const dayEntries = scoped.filter(s => s.date === date);
+
+  const matchesShift = (s) => {
+    if (!shiftFilter) return true;
+    if (shiftFilter === "AM" || shiftFilter === "PM") return s.shift === shiftFilter || s.shift === "Full";
+    return s.shift === shiftFilter; // "Full" filter: exact match only
+  };
+
+  const filteredEntries = dayEntries.filter(s => {
+    if (shopFilter && s.shopName !== shopFilter) return false;
+    if (!matchesShift(s)) return false;
+    return true;
+  });
+
+  const byShop = new Map();
+  let shopsToShow = shopFilter ? state.shops.filter(s => s.name === shopFilter) : state.shops;
+  if (visible) shopsToShow = shopsToShow.filter(s => visible.has(s.name));
+  shopsToShow.forEach(shop => byShop.set(shop.name, []));
+  filteredEntries.forEach(s => {
+    if (!byShop.has(s.shopName)) byShop.set(s.shopName, []);
+    byShop.get(s.shopName).push(s);
+  });
+
+  const shopNames = Array.from(byShop.keys()).sort((a, b) => a.localeCompare(b));
+  return { date, shopFilter, shiftFilter, byShop, shopNames };
+}
+
+function roundRectPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function downloadScheduleImage() {
+  const { date, shopFilter, shiftFilter, byShop, shopNames } = buildScheduleExportData();
+
+  const FONT = "-apple-system, 'Segoe UI', Arial, sans-serif";
+  const width = 800;
+  const margin = 28;
+  const headerHeight = 96;
+  const lineHeight = 26;
+  const shopHeaderHeight = 30;
+  const shopGap = 14;
+  const blockPadding = 12;
+  const footerHeight = 34;
+
+  const shopHeights = shopNames.map(name => {
+    const rows = Math.max(byShop.get(name).length, 1);
+    return shopHeaderHeight + rows * lineHeight + blockPadding * 2;
+  });
+  const contentHeight = shopNames.length === 0
+    ? 50
+    : shopHeights.reduce((a, b) => a + b, 0) + shopGap * (shopNames.length - 1);
+
+  const totalHeight = headerHeight + margin + contentHeight + margin + footerHeight;
+
+  const scale = 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = width * scale;
+  canvas.height = totalHeight * scale;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(scale, scale);
+
+  // Background
+  ctx.fillStyle = "#0F1B2D";
+  ctx.fillRect(0, 0, width, totalHeight);
 
   // Header
-  docPdf.setFillColor(15, 27, 45);
-  docPdf.rect(0, 0, pageWidth, 70, "F");
-  docPdf.setTextColor(255, 255, 255);
-  docPdf.setFont("helvetica", "bold");
-  docPdf.setFontSize(16);
-  docPdf.text("Agent Location Log — Schedule Report", margin, 32);
-  docPdf.setFont("helvetica", "normal");
-  docPdf.setFontSize(10);
-  docPdf.setTextColor(220, 220, 220);
-  docPdf.text(`Date: ${formatDate(date)}`, margin, 50);
+  ctx.fillStyle = "#F2A93B";
+  ctx.font = `bold 22px ${FONT}`;
+  ctx.fillText("Agent Schedule", margin, 38);
+  ctx.fillStyle = "#EAF0F8";
+  ctx.font = `600 15px ${FONT}`;
+  ctx.fillText(formatDate(date), margin, 62);
 
-  let filterLine = [];
-  if (shopFilter) filterLine.push(`Shop: ${shopFilter}`);
-  if (shiftFilter) filterLine.push(`Shift: ${shiftFilter === "Full" ? "Full day" : shiftFilter}`);
-  filterLine.push(`Generated: ${new Date().toLocaleString()}`);
-  docPdf.text(filterLine.join("   •   "), margin, 63);
+  const filterParts = [];
+  if (shopFilter) filterParts.push(`Shop: ${shopFilter}`);
+  if (shiftFilter) {
+    const label = shiftFilter === "Full" ? "Full day" : shiftFilter;
+    filterParts.push(`Shift: ${label}${shiftFilter !== "Full" ? " (incl. Full day)" : ""}`);
+  }
+  ctx.fillStyle = "#93A5C2";
+  ctx.font = `12px ${FONT}`;
+  ctx.fillText(filterParts.length ? filterParts.join("   •   ") : "All shops • All shifts", margin, 82);
 
-  // Table rows: one per agent entry, grouped by shop
-  const rows = [];
-  shopNames.forEach(shopName => {
-    const entries = byShop.get(shopName);
-    if (entries.length === 0) {
-      rows.push([shopName, "—", "—"]);
-    } else {
-      entries.forEach((e, i) => {
-        const shiftLabel = e.shift === "Full" ? "Full day" : e.shift;
-        rows.push([i === 0 ? shopName : "", e.agentName, shiftLabel]);
-      });
-    }
-  });
+  // Body
+  let y = headerHeight + margin;
+  const chipColors = {
+    AM: { border: "#7a5a1e", text: "#ffd27a" },
+    PM: { border: "#215079", text: "#8fd0ff" },
+    Full: { border: "#1e6a3f", text: "#9be8b9" }
+  };
 
-  docPdf.autoTable({
-    startY: 90,
-    margin: { left: margin, right: margin },
-    head: [["Shop", "Agent", "Shift"]],
-    body: rows,
-    theme: "grid",
-    headStyles: { fillColor: [30, 51, 80], textColor: 255, fontStyle: "bold" },
-    styles: { fontSize: 10, cellPadding: 6, textColor: [30, 30, 30] },
-    alternateRowStyles: { fillColor: [245, 247, 250] }
-  });
-
-  // Day off section
-  let y = docPdf.lastAutoTable.finalY + 24;
-  docPdf.setTextColor(30, 30, 30);
-  docPdf.setFont("helvetica", "bold");
-  docPdf.setFontSize(12);
-  docPdf.text("Day off", margin, y);
-  y += 6;
-
-  if (offAgents.length === 0) {
-    docPdf.setFont("helvetica", "normal");
-    docPdf.setFontSize(10);
-    docPdf.text("Everyone on the roster has a shift logged for this day.", margin, y + 16);
+  if (shopNames.length === 0) {
+    ctx.fillStyle = "#5F7593";
+    ctx.font = `14px ${FONT}`;
+    ctx.fillText("No shops match this filter.", margin, y + 18);
   } else {
-    docPdf.autoTable({
-      startY: y + 10,
-      margin: { left: margin, right: margin },
-      head: [["Agent", "Status"]],
-      body: offAgents.map(a => [a.name || a.email, "Day off"]),
-      theme: "grid",
-      headStyles: { fillColor: [30, 51, 80], textColor: 255, fontStyle: "bold" },
-      styles: { fontSize: 10, cellPadding: 6, textColor: [30, 30, 30] },
-      alternateRowStyles: { fillColor: [245, 247, 250] }
+    shopNames.forEach((name, i) => {
+      const entries = byShop.get(name);
+      const h = shopHeights[i];
+
+      ctx.fillStyle = "#1E3350";
+      roundRectPath(ctx, margin, y, width - margin * 2, h, 8);
+      ctx.fill();
+
+      ctx.fillStyle = "#EAF0F8";
+      ctx.font = `bold 15px ${FONT}`;
+      ctx.fillText(name, margin + 16, y + 22);
+
+      const countText = `${entries.length} agent${entries.length === 1 ? "" : "s"}`;
+      ctx.font = `bold 11px ${FONT}`;
+      const countWidth = ctx.measureText(countText).width;
+      ctx.fillStyle = "#F2A93B";
+      ctx.fillText(countText, width - margin - 16 - countWidth, y + 21);
+
+      let ly = y + shopHeaderHeight + blockPadding;
+      if (entries.length === 0) {
+        ctx.fillStyle = "#5F7593";
+        ctx.font = `13px ${FONT}`;
+        ctx.fillText("No agents scheduled", margin + 16, ly + 13);
+      } else {
+        entries.forEach(e => {
+          const shiftLabel = e.shift === "Full" ? "Full day" : e.shift;
+          ctx.fillStyle = "#EAF0F8";
+          ctx.font = `13px ${FONT}`;
+          ctx.fillText(e.agentName, margin + 16, ly + 13);
+
+          ctx.font = `bold 10px ${FONT}`;
+          const chipText = shiftLabel.toUpperCase();
+          const chipTextWidth = ctx.measureText(chipText).width;
+          const chipW = chipTextWidth + 18;
+          const chipX = width - margin - 16 - chipW;
+          const colors = chipColors[e.shift] || { border: "#2A4363", text: "#93A5C2" };
+
+          ctx.strokeStyle = colors.border;
+          ctx.lineWidth = 1;
+          roundRectPath(ctx, chipX, ly - 1, chipW, 18, 9);
+          ctx.stroke();
+          ctx.fillStyle = colors.text;
+          ctx.fillText(chipText, chipX + 9, ly + 12);
+
+          ly += lineHeight;
+        });
+      }
+      y += h + shopGap;
     });
   }
 
-  // Footer with page numbers
-  const pageCount = docPdf.internal.getNumberOfPages();
-  for (let i = 1; i <= pageCount; i++) {
-    docPdf.setPage(i);
-    docPdf.setFontSize(8);
-    docPdf.setTextColor(150, 150, 150);
-    docPdf.text(`Page ${i} of ${pageCount}`, pageWidth - margin, docPdf.internal.pageSize.getHeight() - 20, { align: "right" });
-  }
+  // Footer
+  ctx.fillStyle = "#5F7593";
+  ctx.font = `11px ${FONT}`;
+  ctx.fillText(`Generated ${new Date().toLocaleString()}`, margin, totalHeight - 14);
 
-  const filenameParts = ["schedule", date];
-  if (shopFilter) filenameParts.push(shopFilter.replace(/\s+/g, "-"));
-  docPdf.save(filenameParts.join("_") + ".pdf");
+  canvas.toBlob(blob => {
+    if (!blob) { showToast("Couldn't generate the image — please try again."); return; }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const parts = ["schedule", date];
+    if (shopFilter) parts.push(shopFilter.replace(/\s+/g, "-"));
+    if (shiftFilter) parts.push(shiftFilter);
+    a.href = url;
+    a.download = parts.join("_") + ".jpg";
+    a.click();
+    URL.revokeObjectURL(url);
+  }, "image/jpeg", 0.92);
 }
 
 // ---------- Shops management ----------
@@ -723,6 +912,7 @@ function renderUsersList() {
       <div>
         <div class="name">${escapeHtml(u.name || u.email)} <span class="role-tag">${u.role.toUpperCase()}</span></div>
         <div class="meta">${escapeHtml(u.email)}</div>
+        ${u.role === "manager" && (u.managedShops || []).length ? `<div class="meta">Manages: ${escapeHtml(u.managedShops.join(", "))}</div>` : ""}
       </div>
       <div style="display:flex; gap:8px;">
         <button class="btn btn-teal btn-sm reset-pw" data-email="${escapeHtml(u.email)}">Send reset email</button>
@@ -757,6 +947,25 @@ function renderUsersList() {
 $("userSearch").addEventListener("input", renderUsersList);
 $("userRoleFilter").addEventListener("change", renderUsersList);
 
+function populateManagedShopsCheckboxes() {
+  const wrap = $("managedShopsCheckboxes");
+  if (state.shops.length === 0) {
+    wrap.innerHTML = `<span class="loc-none">No shops configured yet — add one on the Shops tab first.</span>`;
+    return;
+  }
+  wrap.innerHTML = state.shops.map(s => `
+    <label class="shop-checkbox-item">
+      <input type="checkbox" value="${escapeHtml(s.name)}"> ${escapeHtml(s.name)}
+    </label>
+  `).join("");
+}
+
+$("newUserRole").addEventListener("change", () => {
+  const isMgr = $("newUserRole").value === "manager";
+  $("managedShopsField").classList.toggle("hidden", !isMgr);
+  if (isMgr) populateManagedShopsCheckboxes();
+});
+
 $("addUserBtn").addEventListener("click", async () => {
   const name = $("newUserName").value.trim();
   const email = $("newUserEmail").value.trim().toLowerCase();
@@ -764,6 +973,12 @@ $("addUserBtn").addEventListener("click", async () => {
   const password = $("newUserPassword").value;
   if (!name || !email || !password) { showToast("Fill in name, email, and password."); return; }
   if (password.length < 6) { showToast("Password must be at least 6 characters."); return; }
+
+  let managedShops = [];
+  if (role === "manager") {
+    managedShops = Array.from($("managedShopsCheckboxes").querySelectorAll("input:checked")).map(el => el.value);
+    if (managedShops.length === 0) { showToast("Select at least one shop for this manager."); return; }
+  }
 
   $("addUserBtn").disabled = true;
   try {
@@ -773,8 +988,12 @@ $("addUserBtn").addEventListener("click", async () => {
     const newUid = cred.user.uid;
     await signOut(secondaryAuth);
     // Write the profile using the primary (admin-authenticated) Firestore connection.
-    await setDoc(doc(db, "users", newUid), { email, name, role });
+    const profileDoc = { email, name, role };
+    if (role === "manager") profileDoc.managedShops = managedShops;
+    await setDoc(doc(db, "users", newUid), profileDoc);
     $("newUserName").value = ""; $("newUserEmail").value = ""; $("newUserPassword").value = "";
+    $("newUserRole").value = "agent";
+    $("managedShopsField").classList.add("hidden");
     await refreshUsersList();
     showToast("User added.");
   } catch (e) {

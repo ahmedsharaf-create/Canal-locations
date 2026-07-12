@@ -129,12 +129,12 @@
       <!-- MY SUBMISSIONS PAGE (everyone) -->
       <div id="page-mysubmissions" class="page hidden">
         <p class="page-title">My submissions</p>
-        <p class="page-sub">Your own shift entries, newest first.</p>
+        <p class="page-sub">Your own shift entries, newest first. Picked the wrong shop? Fix it with "Edit shop".</p>
         <div class="stat-row" id="myStatRow"></div>
         <div class="table-scroll">
           <table>
             <thead>
-              <tr><th>Date / Submitted</th><th>Shop</th><th>Shift</th><th>Location</th></tr>
+              <tr><th>Date / Submitted</th><th>Shop</th><th>Shift</th><th>Location</th><th></th></tr>
             </thead>
             <tbody id="myDashboardBody"></tbody>
           </table>
@@ -209,7 +209,7 @@
             </select>
           </div>
           <div class="field" style="display:flex; align-items:flex-end;">
-            <button class="btn btn-primary" id="scheduleDownloadBtn">Download report (PDF)</button>
+            <button class="btn btn-primary" id="scheduleDownloadBtn">Download image (JPG)</button>
           </div>
         </div>
         <div class="stat-row" id="scheduleStatRow"></div>
@@ -247,9 +247,14 @@
               <label>Role</label>
               <select id="newUserRole">
                 <option value="agent">Agent</option>
+                <option value="manager">Shop Manager</option>
                 <option value="admin">Admin</option>
               </select>
             </div>
+          </div>
+          <div class="field hidden" id="managedShopsField">
+            <label>Managed shops</label>
+            <div class="shop-checkbox-list" id="managedShopsCheckboxes"></div>
           </div>
           <div class="field">
             <label>Email</label>
@@ -271,6 +276,7 @@
             <select id="userRoleFilter">
               <option value="">All roles</option>
               <option value="admin">Admin</option>
+              <option value="manager">Shop Manager</option>
               <option value="agent">Agent</option>
             </select>
           </div>
@@ -294,8 +300,6 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="vendor/jspdf.umd.min.js"></script>
-<script src="vendor/jspdf.plugin.autotable.min.js"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>

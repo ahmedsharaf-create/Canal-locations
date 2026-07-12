@@ -4,6 +4,11 @@ A small web app for field agents to log their date, name, shop, shift, and
 GPS location — with an admin dashboard, shop list, and user management.
 Built as a static site (no build step) using Firebase Auth + Firestore.
 
+> **Updating from an earlier version?** This release changes `firestore.rules`
+> (to allow agents to fix their own shop selection) — re-paste the file into
+> Firebase console → Firestore Database → Rules → Publish, or the "Edit shop"
+> feature will fail with a permissions error.
+
 ## 1. Configure Firebase (do this first)
 
 Your project (`canal2-loca`) is already wired up in `firebase-config.js`.
@@ -58,11 +63,28 @@ later from the Users tab — that list is just the bootstrap whitelist.
 
 ## What agents see
 
-A single form: Date, Agent Name, Shop (dropdown), Shift (AM / PM / Full
-day). On submit, the app asks the browser for the device's GPS location
-(the browser will prompt for permission) and stores it with the entry. If
-location access is denied or unavailable, the entry still submits — just
-without coordinates.
+A form: Date, Agent Name, Shop (dropdown), Shift (AM / PM / Full day). On
+submit, the app asks the browser for the device's GPS location (the browser
+will prompt for permission) and requires it to succeed — **entries without
+a location are not accepted**. If GPS is slow or unavailable (e.g. indoors),
+it automatically retries with a lower-accuracy fallback before giving up;
+if it still can't get a location, the agent is asked to enable location
+access and try again.
+
+**One shift entry per person per day**: before submitting, the app checks
+whether the signed-in user has already logged AM, PM, or Full day for that
+date, and blocks a second submission that would overlap with it (e.g. you
+can't log both AM and PM separately if you already logged Full day, and
+vice versa). This check is keyed to whoever is logged in, so it assumes
+each agent submits their own entries under their own account.
+
+Every user also has a **"My Submissions"** page — their own entries only,
+newest first, with the same location/shift detail as the admin dashboard,
+just scoped to themselves. If someone picks the wrong shop by mistake, an
+**"Edit shop"** button on each row lets them fix just that field — the
+Firestore rules only allow changing `shopName` on your own entry, not the
+date, shift, or location, so this can't be used to backdate or falsify a
+submission.
 
 Location requires HTTPS, which Vercel provides automatically. It also
 works on `localhost` for local testing.
@@ -79,15 +101,34 @@ works on `localhost` for local testing.
   day), plus a "Day off" section listing agents (role: Agent) who have no
   entry logged for that date. This is based on who's actually signed in and
   submitted, matched by their login email — not on typed-in names, so it
-  stays accurate even if two agents share a similar name. A **"Download
-  report (PDF)"** button exports the currently-filtered view as a branded,
-  print-ready PDF (shop/agent/shift table, day-off list, page numbers).
-- **Users** — search by name/email and filter by role (Admin/Agent) to
-  quickly find someone in a longer roster.
+  stays accurate even if two agents share a similar name.
+
+  A **"Download image (JPG)"** button exports the currently-filtered roster
+  as a branded image, drawn entirely in the browser (no external library or
+  network call needed). It differs from the on-screen view in two ways,
+  intentionally: filtering by AM or PM also includes Full-day agents (they
+  cover that half of the day too), and the Day-off list is left out of the
+  image — it's a working roster, not a full report.
+- **Users** — search by name/email, filter by role (Admin/Shop
+  Manager/Agent), add new users, and send password-reset emails.
 - **Shops** — add or remove shop locations (the 13 you gave are pre-seeded
   on first run).
-- **Users** — add agents/admins (name, email, temp password) and send
-  password-reset emails.
+
+## Shop Managers
+
+A third role, in between Agent and Admin: when adding a user, pick **Shop
+Manager** and check off the shop(s) they're responsible for. They get their
+own **Dashboard** and **Schedule** tabs — same as an admin's — but scoped
+only to their assigned shop(s):
+
+- Dashboard totals, the shop filter dropdown, and CSV/PDF exports only ever
+  include their shops.
+- Schedule's "Day off" list is limited to agents who have actually logged a
+  shift at one of their shops before (there's no formal agent-to-shop
+  assignment in this app, so this is inferred from submission history
+  rather than a fixed roster).
+- They can't see Shops or Users management — those stay admin-only — and
+  they can't delete entries (only admins can).
 
 ## Notes on how accounts work
 
