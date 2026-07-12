@@ -800,7 +800,7 @@ function downloadScheduleImage() {
 
           const submittedAt = formatTime(e.createdAt);
           if (submittedAt && submittedAt !== "—") {
-            ctx.fillStyle = "#5F7593";
+            ctx.fillStyle = "#FFFFF";
             ctx.font = `11px ${FONT}`;
             ctx.fillText(submittedAt, margin + 16 + nameWidth + 10, ly + 13);
           }
