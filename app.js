@@ -796,6 +796,14 @@ function downloadScheduleImage() {
           ctx.fillStyle = "#EAF0F8";
           ctx.font = `13px ${FONT}`;
           ctx.fillText(e.agentName, margin + 16, ly + 13);
+          const nameWidth = ctx.measureText(e.agentName).width;
+
+          const submittedAt = formatTime(e.createdAt);
+          if (submittedAt && submittedAt !== "—") {
+            ctx.fillStyle = "#5F7593";
+            ctx.font = `11px ${FONT}`;
+            ctx.fillText(submittedAt, margin + 16 + nameWidth + 10, ly + 13);
+          }
 
           ctx.font = `bold 10px ${FONT}`;
           const chipText = shiftLabel.toUpperCase();
