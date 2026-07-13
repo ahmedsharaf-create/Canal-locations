@@ -273,7 +273,9 @@ async function refreshAgents() {
 
 function populateShopSelects() {
   const opts = state.shops.map(s => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}</option>`).join("");
-  $("fShop").innerHTML = opts || `<option value="">No shops yet</option>`;
+  $("fShop").innerHTML = state.shops.length
+    ? `<option value="" selected disabled>Select your shop</option>` + opts
+    : `<option value="">No shops yet</option>`;
 
   const visible = getVisibleShopNames();
   const filterShops = visible ? state.shops.filter(s => visible.has(s.name)) : state.shops;
@@ -800,7 +802,7 @@ function downloadScheduleImage() {
 
           const submittedAt = formatTime(e.createdAt);
           if (submittedAt && submittedAt !== "—") {
-            ctx.fillStyle = "#FFFFF";
+            ctx.fillStyle = "#5F7593";
             ctx.font = `11px ${FONT}`;
             ctx.fillText(submittedAt, margin + 16 + nameWidth + 10, ly + 13);
           }
