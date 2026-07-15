@@ -742,7 +742,7 @@ function downloadScheduleImage() {
   ctx.fillStyle = "#F2A93B";
   ctx.font = `bold 22px ${FONT}`;
   ctx.fillText("Agent Schedule", margin, 38);
-  ctx.fillStyle = "#FFFFFf";
+  ctx.fillStyle = "#FFFFFF";
   ctx.font = `600 15px ${FONT}`;
   ctx.fillText(formatDate(date), margin, 62);
 
@@ -802,7 +802,7 @@ function downloadScheduleImage() {
 
           const submittedAt = formatTime(e.createdAt);
           if (submittedAt && submittedAt !== "—") {
-            ctx.fillStyle = "#5F7593";
+            ctx.fillStyle = "#FFFFFF";
             ctx.font = `11px ${FONT}`;
             ctx.fillText(submittedAt, margin + 16 + nameWidth + 10, ly + 13);
           }
