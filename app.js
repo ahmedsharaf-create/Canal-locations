@@ -742,7 +742,7 @@ function downloadScheduleImage() {
   ctx.fillStyle = "#F2A93B";
   ctx.font = `bold 22px ${FONT}`;
   ctx.fillText("Agent Schedule", margin, 38);
-  ctx.fillStyle = "#EAF0F8";
+  ctx.fillStyle = "#FFFFFf";
   ctx.font = `600 15px ${FONT}`;
   ctx.fillText(formatDate(date), margin, 62);
 
