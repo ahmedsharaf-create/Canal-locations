@@ -752,7 +752,7 @@ function downloadScheduleImage() {
     const label = shiftFilter === "Full" ? "Full day" : shiftFilter;
     filterParts.push(`Shift: ${label}${shiftFilter !== "Full" ? " (incl. Full day)" : ""}`);
   }
-  ctx.fillStyle = "#93A5C2";
+  ctx.fillStyle = "#FFFFFF";
   ctx.font = `12px ${FONT}`;
   ctx.fillText(filterParts.length ? filterParts.join("   •   ") : "All shops • All shifts", margin, 82);
 
